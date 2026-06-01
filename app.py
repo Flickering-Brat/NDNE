@@ -96,19 +96,35 @@ def load_ndne_materials():
 @st.cache_resource
 def get_db_pool():
     if not all([DB_USER, DB_PASS, DB_DSN]):
-        st.error("Missing database environment variables (DB_USER, DB_PASS, DB_DSN). Check your .env file.")
+        st.error("Missing database environment variables (DB_USER, DB_PASS, DB_DSN). Check your .env file or Streamlit Secrets.")
         return None
+    
     try:
-        # Get absolute path to wallet folder
         root_dir = os.path.dirname(os.path.abspath(__file__))
         wallet_path = os.path.join(root_dir, "wallet")
         
+        # ── Handle Secret-based Wallet (for Public Repos) ──
+        wallet_b64 = get_secret("WALLET_ZIP_BASE64")
+        if wallet_b64:
+            import base64, zipfile, io
+            wallet_path = os.path.join(root_dir, "temp_wallet")
+            if not os.path.exists(wallet_path):
+                os.makedirs(wallet_path)
+                try:
+                    z = zipfile.ZipFile(io.BytesIO(base64.b64decode(wallet_b64)))
+                    z.extractall(wallet_path)
+                    # Update sqlnet.ora to point to the temp directory
+                    sqlnet_path = os.path.join(wallet_path, "sqlnet.ora")
+                    if os.path.exists(sqlnet_path):
+                        with open(sqlnet_path, "r") as f:
+                            content = f.read()
+                        content = content.replace('DIRECTORY="?/network/admin"', f'DIRECTORY="{wallet_path}"')
+                        with open(sqlnet_path, "w") as f:
+                            f.write(content)
+                except Exception as e:
+                    st.error(f"Error extracting wallet secret: {e}")
+        
         if os.path.exists(wallet_path):
-            # Check for essential wallet files
-            tns_path = os.path.join(wallet_path, "tnsnames.ora")
-            if not os.path.exists(tns_path):
-                st.sidebar.error(f"Missing tnsnames.ora in {wallet_path}")
-            
             return oracledb.create_pool(
                 user=DB_USER, 
                 password=DB_PASS, 
@@ -119,7 +135,7 @@ def get_db_pool():
                 wallet_password=WALLET_PASS
             )
         else:
-            st.sidebar.error(f"Wallet directory not found at: {wallet_path}")
+            st.sidebar.error("Wallet directory not found. If this is a public repo, ensure WALLET_ZIP_BASE64 is set in Streamlit Secrets.")
             
         return oracledb.create_pool(user=DB_USER, password=DB_PASS, dsn=DB_DSN, min=1, max=5, increment=1)
     except Exception as e:

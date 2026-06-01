@@ -8,9 +8,13 @@ env/
 venv/
 ENV/
 
+# Sensitive Database Wallet
+wallet/
+
 # Data files (Streamlit uses DB, avoid pushing large local files)
 *.xlsx
 *.zip
+...
 
 # OS
 .DS_Store
