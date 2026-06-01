@@ -113,6 +113,14 @@ def get_db_pool():
                 try:
                     z = zipfile.ZipFile(io.BytesIO(base64.b64decode(wallet_b64)))
                     z.extractall(wallet_path)
+                    
+                    # 💡 Fix: If files were extracted into a 'wallet/' subfolder, move them up
+                    sub_wallet = os.path.join(wallet_path, "wallet")
+                    if os.path.exists(sub_wallet) and os.path.isdir(sub_wallet):
+                        for f in os.listdir(sub_wallet):
+                            import shutil
+                            shutil.move(os.path.join(sub_wallet, f), os.path.join(wallet_path, f))
+                    
                     # Update sqlnet.ora to point to the temp directory
                     sqlnet_path = os.path.join(wallet_path, "sqlnet.ora")
                     if os.path.exists(sqlnet_path):
@@ -123,6 +131,11 @@ def get_db_pool():
                             f.write(content)
                 except Exception as e:
                     st.error(f"Error extracting wallet secret: {e}")
+            
+            # Diagnostic: Verify tnsnames.ora exists
+            if not os.path.exists(os.path.join(wallet_path, "tnsnames.ora")):
+                available = os.listdir(wallet_path) if os.path.exists(wallet_path) else "Dir not found"
+                st.error(f"Wallet extraction failed. tnsnames.ora not found in {wallet_path}. Files found: {available}")
         
         if os.path.exists(wallet_path):
             return oracledb.create_pool(
