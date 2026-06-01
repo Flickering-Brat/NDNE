@@ -106,36 +106,44 @@ def get_db_pool():
         # ── Handle Secret-based Wallet (for Public Repos) ──
         wallet_b64 = get_secret("WALLET_ZIP_BASE64")
         if wallet_b64:
-            import base64, zipfile, io
+            import base64, zipfile, io, shutil
             wallet_path = os.path.join(root_dir, "temp_wallet")
-            if not os.path.exists(wallet_path):
-                os.makedirs(wallet_path)
+            
+            # 1. Extract if not already done
+            if not os.path.exists(os.path.join(wallet_path, "tnsnames.ora")):
+                if not os.path.exists(wallet_path):
+                    os.makedirs(wallet_path)
                 try:
                     z = zipfile.ZipFile(io.BytesIO(base64.b64decode(wallet_b64)))
                     z.extractall(wallet_path)
-                    
-                    # 💡 Fix: If files were extracted into a 'wallet/' subfolder, move them up
-                    sub_wallet = os.path.join(wallet_path, "wallet")
-                    if os.path.exists(sub_wallet) and os.path.isdir(sub_wallet):
-                        for f in os.listdir(sub_wallet):
-                            import shutil
-                            shutil.move(os.path.join(sub_wallet, f), os.path.join(wallet_path, f))
-                    
-                    # Update sqlnet.ora to point to the temp directory
-                    sqlnet_path = os.path.join(wallet_path, "sqlnet.ora")
-                    if os.path.exists(sqlnet_path):
-                        with open(sqlnet_path, "r") as f:
-                            content = f.read()
-                        content = content.replace('DIRECTORY="?/network/admin"', f'DIRECTORY="{wallet_path}"')
-                        with open(sqlnet_path, "w") as f:
-                            f.write(content)
                 except Exception as e:
                     st.error(f"Error extracting wallet secret: {e}")
+
+            # 2. 💡 Fix: If files were extracted into a 'wallet/' subfolder, move them up
+            sub_wallet = os.path.join(wallet_path, "wallet")
+            if os.path.exists(sub_wallet) and os.path.isdir(sub_wallet):
+                for f in os.listdir(sub_wallet):
+                    src = os.path.join(sub_wallet, f)
+                    dest = os.path.join(wallet_path, f)
+                    if not os.path.exists(dest):
+                        shutil.move(src, dest)
+            
+            # 3. Update sqlnet.ora to point to the correct directory
+            sqlnet_path = os.path.join(wallet_path, "sqlnet.ora")
+            if os.path.exists(sqlnet_path):
+                with open(sqlnet_path, "r") as f:
+                    content = f.read()
+                if 'DIRECTORY="' in content:
+                    content = content.replace('DIRECTORY="?/network/admin"', f'DIRECTORY="{wallet_path}"')
+                    with open(sqlnet_path, "w") as f:
+                        f.write(content)
             
             # Diagnostic: Verify tnsnames.ora exists
             if not os.path.exists(os.path.join(wallet_path, "tnsnames.ora")):
-                available = os.listdir(wallet_path) if os.path.exists(wallet_path) else "Dir not found"
-                st.error(f"Wallet extraction failed. tnsnames.ora not found in {wallet_path}. Files found: {available}")
+                available = []
+                for root, dirs, files in os.walk(wallet_path):
+                    for name in files: available.append(os.path.join(root, name))
+                st.error(f"Wallet extraction failed. tnsnames.ora missing. Found: {available}")
         
         if os.path.exists(wallet_path):
             return oracledb.create_pool(
