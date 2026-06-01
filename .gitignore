@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Data files (Streamlit uses DB, avoid pushing large local files)
+*.xlsx
+*.zip
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+cron_log.txt
+Action_Report.txt
+app_backup_20260506.py
+verify_fix.py
+test_*.py
+simulate_app_load.py
+setup_cron.sh
+check_tables.py
+drop.py
+upload_*.py
+ndne_mat_code.txt_backup

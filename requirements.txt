@@ -1,0 +1,8 @@
+streamlit
+pandas
+openpyxl
+plotly
+oracledb
+streamlit-aggrid
+pydeck
+python-dotenv
