@@ -344,6 +344,7 @@ with st.sidebar:
     st.divider()
     st.markdown("**Dashboard Filters**")
     selected_fy = st.selectbox("Financial Year", ["2026-27", "2025-26", "2024-25"], index=0)
+    start_year = int(selected_fy.split('-')[0])
     
     fy_start_map = {
         "2024-25": "2024-04-01",
@@ -456,13 +457,23 @@ def get_fractional_months(m_date):
     days_in_m = calendar.monthrange(m_date.year, m_date.month)[1]
     return full_m + (m_date.day / float(days_in_m))
 
-months_passed = get_fractional_months(max_date)
+real_today = pd.Timestamp.now()
+# If today is within selected FY and later than max_date, use today for proration
+if start_date <= real_today.strftime('%Y-%m-%d') <= end_date:
+    proration_date = max(max_date, real_today)
+else:
+    proration_date = max_date
+
+months_passed = get_fractional_months(proration_date)
 
 # Extract elapsed month numbers (e.g., '04', '05') for LY comparison
-elapsed_month_nums = df_act['BILL_DATE'].dt.strftime('%m').unique().tolist()
-cur_month_num = max_date.strftime('%m')
-days_in_cur_month = calendar.monthrange(max_date.year, max_date.month)[1]
-ly_prorata_factor = max_date.day / float(days_in_cur_month)
+fy_months_list = [m for m in FY_MONTH_ORDER if start_date <= m <= end_date]
+elapsed_month_strs = [m for m in fy_months_list if m <= proration_date.strftime('%Y-%m')]
+elapsed_month_nums = sorted(list(set([m.split('-')[1] for m in elapsed_month_strs + df_act['MONTH'].unique().tolist()])))
+
+cur_month_num = proration_date.strftime('%m')
+days_in_cur_month = calendar.monthrange(proration_date.year, proration_date.month)[1]
+ly_prorata_factor = proration_date.day / float(days_in_cur_month)
 
 # ── Build df_core (master + base + cumulative actuals) ────────────────────────
 # Calculate LY Sales YTD from df_ly (matching current elapsed months)
@@ -507,9 +518,18 @@ def build_monthly_df(act_df, ly_df, base_df):
             .rename(columns={'QTY_MT':'CY (MT)'}))
     
     # LY Monthly (join with base to get growth target)
-    ly_df['MONTH_YEAR'] = ly_df['MONTH_NUM'].apply(lambda x: f"2024-{x}" if int(x) >= 4 else f"2025-{x}") # Approx mapping for labels
-    # Actually, we should map based on the CY months
-    cy_months = sorted(act_df['MONTH'].unique(), key=fy_month_key)
+    ly_df['MONTH_YEAR'] = ly_df['MONTH_NUM'].apply(lambda x: f"{start_year-1}-{x}" if int(x) >= 4 else f"{start_year}-{x}")
+    
+    # Determine which months to show: all months in FY up to current date or max data date
+    real_today = pd.Timestamp.now()
+    current_month_str = real_today.strftime('%Y-%m')
+    
+    # Filter FY_MONTH_ORDER for the selected FY
+    fy_months = [m for m in FY_MONTH_ORDER if start_date <= m <= end_date]
+    
+    # Show months that have data OR are past/current in the selected FY
+    cy_months = [m for m in fy_months if m <= current_month_str or m in act_df['MONTH'].unique()]
+    cy_months = sorted(list(set(cy_months)), key=fy_month_key)
     
     m_data = []
     for m in cy_months:
@@ -519,7 +539,6 @@ def build_monthly_df(act_df, ly_df, base_df):
         ly_m_data = ly_df[ly_df['MONTH_NUM'] == m_num].copy()
         
         # Apply Proration if it's the current month (Same Period Comparison)
-        # We only do this for the summary table's LY/Target values
         if m_num == cur_month_num:
              ly_m_data['LY_QTY_MT'] = ly_m_data['LY_QTY_MT'] * ly_prorata_factor
              if 'LY_QTY_EA' in ly_m_data.columns:
@@ -531,8 +550,8 @@ def build_monthly_df(act_df, ly_df, base_df):
         ly_target_m = pd.merge(ly_m_data, base_df[['DIST_CODE', 'SEGMENT', 'TARGET_GROWTH_PCT']], on=['DIST_CODE', 'SEGMENT'], how='left').fillna(0)
         target_val = (ly_target_m['LY_QTY_MT'] * (1 + ly_target_m['TARGET_GROWTH_PCT'] / 100.0)).sum()
         
-        # Correct LY year label based on month number (Apr-Dec 2024, Jan-Mar 2025 for LY)
-        ly_year = "2024" if int(m_num) >= 4 else "2025"
+        # Correct LY year label based on month number
+        ly_year = str(start_year - 1) if int(m_num) >= 4 else str(start_year)
         m_label = MONTH_LABELS.get(m, m)
         ly_month_name = m_label.split("'")[0]
         
@@ -633,20 +652,22 @@ with tab_month:
         
         ly_month = df_ly.groupby(['DIST_CODE', 'MONTH_NUM'])['LY_QTY_MT'].sum().reset_index()
         
-        cy_months = sorted(cy_month['MONTH_NUM'].unique())
+        # Determine which months to show: all months in FY up to current date or max data date
+        real_today = pd.Timestamp.now()
+        current_month_str = real_today.strftime('%Y-%m')
+        fy_months = [m for m in FY_MONTH_ORDER if start_date <= m <= end_date]
+        elapsed_months = [m for m in fy_months if m <= current_month_str or m in df_act['MONTH'].unique()]
+        cy_months = sorted(list(set([m.split('-')[1] for m in elapsed_months])), key=lambda x: (int(x)-4)%12)
+        
         pivot_df = df_master[['DIST_CODE', 'DIST_NAME', 'LSA_NAME']].copy()
         
         for m_num in cy_months:
-            month_name = ""
-            for full_m, short_m in MONTH_LABELS.items():
-                if full_m.endswith(f"-{m_num}") and "26" in short_m:
-                    month_name = short_m.replace("'26", "")
-                    break
-            if not month_name: month_name = m_num
+            # Get short month name (e.g., 'Apr')
+            month_name = next((v[:3] for k, v in MONTH_LABELS.items() if k.endswith(f"-{m_num}")), m_num)
             
-            # Correct years: CY is 2026/27, LY is 2025/26
-            cy_year = "2026" if int(m_num) >= 4 else "2027"
-            ly_year = "2025" if int(m_num) >= 4 else "2026"
+            # Correct years based on start_year
+            cy_year = str(start_year) if int(m_num) >= 4 else str(start_year + 1)
+            ly_year = str(start_year - 1) if int(m_num) >= 4 else str(start_year)
             
             cy_col = f"{month_name} {cy_year} Actuals"
             ly_col = f"{month_name} {ly_year} Actuals"
@@ -668,11 +689,10 @@ with tab_month:
         lsa_pivot = pivot_df.groupby('LSA_NAME')[lsa_cols].sum().reset_index()
         
         for m_num in cy_months:
-            month_name = [short_m.replace("'26", "") for full_m, short_m in MONTH_LABELS.items() if full_m.endswith(f"-{m_num}") and "26" in short_m]
-            month_name = month_name[0] if month_name else m_num
+            month_name = next((v[:3] for k, v in MONTH_LABELS.items() if k.endswith(f"-{m_num}")), m_num)
             
-            cy_year = "2026" if int(m_num) >= 4 else "2027"
-            ly_year = "2025" if int(m_num) >= 4 else "2026"
+            cy_year = str(start_year) if int(m_num) >= 4 else str(start_year + 1)
+            ly_year = str(start_year - 1) if int(m_num) >= 4 else str(start_year)
             
             cy_col = f"{month_name} {cy_year} Actuals"
             ly_col = f"{month_name} {ly_year} Actuals"
@@ -682,11 +702,10 @@ with tab_month:
         total_lsa = pd.DataFrame([{'LSA_NAME': 'GRAND TOTAL'}])
         for c in lsa_cols: total_lsa[c] = lsa_pivot[c].sum()
         for m_num in cy_months:
-            month_name = [short_m.replace("'26", "") for full_m, short_m in MONTH_LABELS.items() if full_m.endswith(f"-{m_num}") and "26" in short_m]
-            month_name = month_name[0] if month_name else m_num
+            month_name = next((v[:3] for k, v in MONTH_LABELS.items() if k.endswith(f"-{m_num}")), m_num)
             
-            cy_year = "2026" if int(m_num) >= 4 else "2027"
-            ly_year = "2025" if int(m_num) >= 4 else "2026"
+            cy_year = str(start_year) if int(m_num) >= 4 else str(start_year + 1)
+            ly_year = str(start_year - 1) if int(m_num) >= 4 else str(start_year)
             
             cy_col = f"{month_name} {cy_year} Actuals"
             ly_col = f"{month_name} {ly_year} Actuals"
@@ -699,11 +718,10 @@ with tab_month:
         
         col_order = ['LSA_NAME']
         for m_num in cy_months:
-            month_name = [short_m.replace("'26", "") for full_m, short_m in MONTH_LABELS.items() if full_m.endswith(f"-{m_num}") and "26" in short_m]
-            month_name = month_name[0] if month_name else m_num
+            month_name = next((v[:3] for k, v in MONTH_LABELS.items() if k.endswith(f"-{m_num}")), m_num)
             
-            cy_year = "2026" if int(m_num) >= 4 else "2027"
-            ly_year = "2025" if int(m_num) >= 4 else "2026"
+            cy_year = str(start_year) if int(m_num) >= 4 else str(start_year + 1)
+            ly_year = str(start_year - 1) if int(m_num) >= 4 else str(start_year)
             
             col_order.extend([f"{month_name} {cy_year} Actuals", f"{month_name} {ly_year} Actuals", f"{month_name} Growth %"])
         lsa_pivot = lsa_pivot[col_order]
@@ -718,15 +736,15 @@ with tab_cur_month:
     st.markdown('<p class="section-header">Current Month Performance — CY vs LY Actuals</p>', unsafe_allow_html=True)
     
     if not df_act.empty and not df_ly.empty:
-        # Get current month from max date in actuals
-        cur_month_str = max_date.strftime('%Y-%m')
-        cur_month_num = max_date.strftime('%m')
+        # Get current month from proration_date (accounts for today's date)
+        cur_month_str = proration_date.strftime('%Y-%m')
+        cur_month_num = proration_date.strftime('%m')
         month_label = MONTH_LABELS.get(cur_month_str, cur_month_str)
         
         # Calculate days for pro-rata
         import calendar
-        last_day_in_month = calendar.monthrange(max_date.year, max_date.month)[1]
-        days_passed_in_month = max_date.day
+        last_day_in_month = calendar.monthrange(proration_date.year, proration_date.month)[1]
+        days_passed_in_month = proration_date.day
         prorata_factor = days_passed_in_month / float(last_day_in_month)
         
         st.subheader(f"Performance for {month_label} (till day {days_passed_in_month} of {last_day_in_month})")
@@ -1018,7 +1036,7 @@ with tab_drill:
                                    name='CY Actual', marker_color=IOC_BLUE))
             if not m_filt.empty:
                 fig_m.add_trace(go.Bar(x=m_filt['Month Label'], y=m_filt['LY Sales (MT)'],
-                                       name='LY Sales (2025)', marker_color='gray', opacity=0.5))
+                                       name=f'LY Sales ({start_year-1})', marker_color='gray', opacity=0.5))
                 fig_m.add_trace(go.Bar(x=m_filt['Month Label'], y=m_filt['Target (MT)'],
                                        name='Target', marker_color=IOC_ORANGE, opacity=0.6))
             fig_m.update_layout(**PLOTLY_LAYOUT, barmode='group',
