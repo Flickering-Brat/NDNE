@@ -12,11 +12,7 @@ from st_aggrid import AgGrid, GridOptionsBuilder
 
 st.set_page_config(page_title="IndianOil NDNE Sales Management", layout="wide", page_icon="🛢️")
 
-st.write("DEBUG: App started...")
-st.info("🚀 System initialized at: " + time.strftime("%H:%M:%S"))
-
 # ── Brand Theming ─────────────────────────────────────────────────────────────
-st.write("DEBUG: Applying themes...")
 st.markdown("""
 <style>
   .stApp { background-color: #0b1426; color: white; }
@@ -390,23 +386,17 @@ def get_active_pool():
     return pool
 
 # ── Data Load ─────────────────────────────────────────────────────────────────
-# Temporarily disable cache for debugging
-# @st.cache_data(ttl=600)
+@st.cache_data(ttl=600)
 def load_data(s_date, e_date):
-    st.write(f"DEBUG: Entering load_data with {s_date} to {e_date}")
     try:
-        with st.status("📡 Connecting to Oracle Database...", expanded=True) as status:
-            st.write("DEBUG: About to call get_db_pool()...")
+        with st.status("📡 Connecting to Oracle Database...", expanded=False) as status:
             pool = get_db_pool()
             if not pool:
-                st.write("DEBUG: get_db_pool() returned None")
                 status.update(label="❌ Connection Failed", state="error")
                 return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
             
-            st.write("DEBUG: About to acquire connection from pool...")
             try:
                 with pool.acquire() as conn:
-                    st.write("DEBUG: Connection acquired!")
                     status.update(label="📊 Fetching Daily Actuals...", expanded=False)
                     df_act = pd.read_sql("""
                         SELECT DIST_CODE,
@@ -454,7 +444,6 @@ def load_data(s_date, e_date):
                     except:
                         df_dom = pd.DataFrame()
             except Exception as conn_err:
-                st.write(f"DEBUG: pool.acquire() or query FAILED: {conn_err}")
                 status.update(label=f"❌ Connection/Query Failed: {conn_err}", state="error")
                 return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
