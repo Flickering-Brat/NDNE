@@ -12,6 +12,8 @@ from st_aggrid import AgGrid, GridOptionsBuilder
 
 st.set_page_config(page_title="IndianOil NDNE Sales Management", layout="wide", page_icon="🛢️")
 
+st.info("🚀 System initialized at: " + time.strftime("%H:%M:%S"))
+
 # ── Brand Theming ─────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
