@@ -381,48 +381,56 @@ else:
 @st.cache_data(ttl=600)
 def load_data(s_date, e_date):
     try:
-        with conn_pool.acquire() as conn:
-            df_act = pd.read_sql("""
-                SELECT DIST_CODE,
-                       TO_CHAR(BILL_DATE,'YYYY-MM') AS MONTH,
-                       BILL_DATE, QTY_EA, QTY_MT, SEGMENT, LSA_NAME, DISTRICT, MAT_CODE
-                FROM NDNE_ACTUALS
-                WHERE BILL_DATE >= TO_DATE(:1, 'YYYY-MM-DD')
-                  AND BILL_DATE <= TO_DATE(:2, 'YYYY-MM-DD')""", 
-                con=conn, params=[s_date, e_date])
-
-            try:
-                df_base = pd.read_sql("""
-                    SELECT DIST_CODE, AVG_MONTHLY_QTY_MT, TOTAL_LY_QTY_EA, SEGMENT, TARGET_GROWTH_PCT
-                    FROM NDNE_BASELINE""", con=conn)
-            except:
-                df_base = pd.DataFrame()
-
-            try:
-                df_master = pd.read_sql("""
-                    SELECT DIST_CODE, DIST_NAME, DISTRICT, LSA_NAME
-                    FROM NDNE_MASTER""", con=conn)
-            except:
-                df_master = pd.DataFrame()
-
-            try:
-                df_ly = pd.read_sql("""
-                    SELECT DIST_CODE, MONTH_NUM, QTY_MT as LY_QTY_MT, 
-                           QTY_EA as LY_QTY_EA, SEGMENT, MAT_CODE
-                    FROM NDNE_LY_ACTUALS""", con=conn)
-            except:
-                df_ly = pd.DataFrame()
-
-            try:
-                df_dom = pd.read_sql("""
-                    SELECT DIST_CODE, SUM(QTY_MT) as DOM_QTY_MT
-                    FROM DOMESTIC_ACTUALS
+        with st.status("📡 Connecting to Oracle Database...", expanded=False) as status:
+            with conn_pool.acquire() as conn:
+                status.update(label="📊 Fetching Daily Actuals...", expanded=False)
+                df_act = pd.read_sql("""
+                    SELECT DIST_CODE,
+                           TO_CHAR(BILL_DATE,'YYYY-MM') AS MONTH,
+                           BILL_DATE, QTY_EA, QTY_MT, SEGMENT, LSA_NAME, DISTRICT, MAT_CODE
+                    FROM NDNE_ACTUALS
                     WHERE BILL_DATE >= TO_DATE(:1, 'YYYY-MM-DD')
-                      AND BILL_DATE <= TO_DATE(:2, 'YYYY-MM-DD')
-                    GROUP BY DIST_CODE""", 
-                con=conn, params=[s_date, e_date])
-            except:
-                df_dom = pd.DataFrame()
+                      AND BILL_DATE <= TO_DATE(:2, 'YYYY-MM-DD')""", 
+                    con=conn, params=[s_date, e_date])
+
+                status.update(label="📉 Fetching Baseline Data...", expanded=False)
+                try:
+                    df_base = pd.read_sql("""
+                        SELECT DIST_CODE, AVG_MONTHLY_QTY_MT, TOTAL_LY_QTY_EA, SEGMENT, TARGET_GROWTH_PCT
+                        FROM NDNE_BASELINE""", con=conn)
+                except:
+                    df_base = pd.DataFrame()
+
+                status.update(label="📋 Fetching Master Data...", expanded=False)
+                try:
+                    df_master = pd.read_sql("""
+                        SELECT DIST_CODE, DIST_NAME, DISTRICT, LSA_NAME
+                        FROM NDNE_MASTER""", con=conn)
+                except:
+                    df_master = pd.DataFrame()
+
+                status.update(label="📅 Fetching Last Year Data...", expanded=False)
+                try:
+                    df_ly = pd.read_sql("""
+                        SELECT DIST_CODE, MONTH_NUM, QTY_MT as LY_QTY_MT, 
+                               QTY_EA as LY_QTY_EA, SEGMENT, MAT_CODE
+                        FROM NDNE_LY_ACTUALS""", con=conn)
+                except:
+                    df_ly = pd.DataFrame()
+
+                status.update(label="⚖️ Fetching Domestic Data...", expanded=False)
+                try:
+                    df_dom = pd.read_sql("""
+                        SELECT DIST_CODE, SUM(QTY_MT) as DOM_QTY_MT
+                        FROM DOMESTIC_ACTUALS
+                        WHERE BILL_DATE >= TO_DATE(:1, 'YYYY-MM-DD')
+                          AND BILL_DATE <= TO_DATE(:2, 'YYYY-MM-DD')
+                        GROUP BY DIST_CODE""", 
+                    con=conn, params=[s_date, e_date])
+                except:
+                    df_dom = pd.DataFrame()
+                
+                status.update(label="✅ Data Load Complete!", state="complete", expanded=False)
 
         if not df_ly.empty and not df_master.empty:
             df_ly = pd.merge(df_ly, df_master[['DIST_CODE', 'LSA_NAME', 'DISTRICT']].drop_duplicates(), on='DIST_CODE', how='left')
@@ -468,8 +476,9 @@ months_passed = get_fractional_months(proration_date)
 
 # Extract elapsed month numbers (e.g., '04', '05') for LY comparison
 fy_months_list = [m for m in FY_MONTH_ORDER if start_date <= m <= end_date]
-elapsed_month_strs = [m for m in fy_months_list if m <= proration_date.strftime('%Y-%m')]
-elapsed_month_nums = sorted(list(set([m.split('-')[1] for m in elapsed_month_strs + df_act['MONTH'].unique().tolist()])))
+current_month_limit = proration_date.strftime('%Y-%m')
+elapsed_month_strs = [m for m in fy_months_list if m <= current_month_limit]
+elapsed_month_nums = sorted(list(set([m.split('-')[1] for m in elapsed_month_strs] + df_act['MONTH'].unique().tolist())))
 
 cur_month_num = proration_date.strftime('%m')
 days_in_cur_month = calendar.monthrange(proration_date.year, proration_date.month)[1]
@@ -1219,6 +1228,55 @@ with tab_lsa:
 
     download_button(lsa_grid_df, "lsa_performance_summary.csv")
     aggrid_render(lsa_grid_df, height=380, fit=True)
+
+    # ── New LSA Report ────────────────────────────────────────────────────────
+    st.divider()
+    st.markdown('<p class="section-header">LSA Comparison (FY vs Current Month)</p>', unsafe_allow_html=True)
+    
+    # Metrics calculation for new report
+    # 1. LY Full Qty (Total LY Actuals from df_ly)
+    lsa_ly_full = df_ly.groupby('LSA_NAME')['LY_QTY_MT'].sum().reset_index().rename(columns={'LY_QTY_MT': 'Full LY Sales (MT)'})
+    
+    # 2. Current Month CY Qty
+    cur_month_str = proration_date.strftime('%Y-%m')
+    lsa_cy_cur = df_act[df_act['MONTH'] == cur_month_str].groupby('LSA_NAME')['QTY_MT'].sum().reset_index().rename(columns={'QTY_MT': 'Cur Month Actual (MT)'})
+    
+    # 3. Prorated Target (already available in lsa_target if Cumulative YTD is selected, but let's recalculate specifically)
+    ly_p = ly_ytd.groupby('LSA_NAME')['LY_QTY_MT'].sum().reset_index()
+    ly_t_p = pd.merge(ly_ytd, df_base[['DIST_CODE', 'SEGMENT', 'TARGET_GROWTH_PCT']], on=['DIST_CODE', 'SEGMENT'], how='left').fillna(0)
+    ly_t_p['TARGET_MT'] = ly_t_p['LY_QTY_MT'] * (1 + ly_t_p['TARGET_GROWTH_PCT'] / 100.0)
+    lsa_prorata_target = ly_t_p.groupby('LSA_NAME')['TARGET_MT'].sum().reset_index().rename(columns={'TARGET_MT': 'Prorata Target YTD (MT)'})
+    
+    # 4. YTD Growth % (CY YTD vs LY YTD)
+    lsa_cy_ytd = df_act.groupby('LSA_NAME')['QTY_MT'].sum().reset_index().rename(columns={'QTY_MT': 'CY YTD (MT)'})
+    lsa_ly_ytd = ly_ytd.groupby('LSA_NAME')['LY_QTY_MT'].sum().reset_index().rename(columns={'LY_QTY_MT': 'LY YTD (MT)'})
+    
+    # Merge all
+    lsa_rep = pd.DataFrame({'LSA': lsa_master_list})
+    lsa_rep = pd.merge(lsa_rep, lsa_ly_full, left_on='LSA', right_on='LSA_NAME', how='left').drop(columns=['LSA_NAME']).fillna(0)
+    lsa_rep = pd.merge(lsa_rep, lsa_cy_cur, left_on='LSA', right_on='LSA_NAME', how='left').drop(columns=['LSA_NAME']).fillna(0)
+    lsa_rep = pd.merge(lsa_rep, lsa_prorata_target, left_on='LSA', right_on='LSA_NAME', how='left').drop(columns=['LSA_NAME']).fillna(0)
+    lsa_rep = pd.merge(lsa_rep, lsa_cy_ytd, left_on='LSA', right_on='LSA_NAME', how='left').drop(columns=['LSA_NAME']).fillna(0)
+    lsa_rep = pd.merge(lsa_rep, lsa_ly_ytd, left_on='LSA', right_on='LSA_NAME', how='left').drop(columns=['LSA_NAME']).fillna(0)
+    
+    lsa_rep['YTD Growth %'] = lsa_rep.apply(lambda r: safe_pct(r['CY YTD (MT)'] - r['LY YTD (MT)'], r['LY YTD (MT)']), axis=1)
+    
+    # Add Grand Total
+    lsa_rep_total = pd.DataFrame([{
+        'LSA': 'GRAND TOTAL',
+        'Full LY Sales (MT)': lsa_rep['Full LY Sales (MT)'].sum(),
+        'Cur Month Actual (MT)': lsa_rep['Cur Month Actual (MT)'].sum(),
+        'Prorata Target YTD (MT)': lsa_rep['Prorata Target YTD (MT)'].sum(),
+        'CY YTD (MT)': lsa_rep['CY YTD (MT)'].sum(),
+        'LY YTD (MT)': lsa_rep['LY YTD (MT)'].sum()
+    }])
+    lsa_rep_total['YTD Growth %'] = safe_pct(lsa_rep_total['CY YTD (MT)'].iloc[0] - lsa_rep_total['LY YTD (MT)'].iloc[0], lsa_rep_total['LY YTD (MT)'].iloc[0])
+    
+    lsa_rep_final = pd.concat([lsa_rep.sort_values('CY YTD (MT)', ascending=False), lsa_rep_total], ignore_index=True)
+    lsa_rep_final = lsa_rep_final[['LSA', 'Full LY Sales (MT)', 'Cur Month Actual (MT)', 'Prorata Target YTD (MT)', 'YTD Growth %']].round(2)
+    
+    download_button(lsa_rep_final, "lsa_fy_comparison_report.csv")
+    aggrid_render(lsa_rep_final, height=350, fit=True)
 
 # ─── TAB 7 : Product YTD ─────────────────────────────────────────────────────
 with tab_product:
