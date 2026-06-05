@@ -157,12 +157,20 @@ def get_db_pool():
                 min=1, max=5, increment=1,
                 config_dir=wallet_path,
                 wallet_location=wallet_path, 
-                wallet_password=WALLET_PASS
+                wallet_password=WALLET_PASS,
+                # Add timeouts to prevent indefinite hangs
+                tcp_connect_timeout=15
             )
         else:
             st.sidebar.error("Wallet directory not found. If this is a public repo, ensure WALLET_ZIP_BASE64 is set in Streamlit Secrets.")
             
-        return oracledb.create_pool(user=DB_USER, password=DB_PASS, dsn=DB_DSN, min=1, max=5, increment=1)
+        return oracledb.create_pool(
+            user=DB_USER, 
+            password=DB_PASS, 
+            dsn=DB_DSN, 
+            min=1, max=5, increment=1,
+            tcp_connect_timeout=15
+        )
     except Exception as e:
         st.error(f"Database Pool Error: {e}")
         return None
@@ -396,56 +404,61 @@ def load_data(s_date, e_date):
                 return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
             
             st.write("DEBUG: About to acquire connection from pool...")
-            with pool.acquire() as conn:
-                st.write("DEBUG: Connection acquired!")
-                status.update(label="📊 Fetching Daily Actuals...", expanded=False)
-                df_act = pd.read_sql("""
-                    SELECT DIST_CODE,
-                           TO_CHAR(BILL_DATE,'YYYY-MM') AS MONTH,
-                           BILL_DATE, QTY_EA, QTY_MT, SEGMENT, LSA_NAME, DISTRICT, MAT_CODE
-                    FROM NDNE_ACTUALS
-                    WHERE BILL_DATE >= TO_DATE(:1, 'YYYY-MM-DD')
-                      AND BILL_DATE <= TO_DATE(:2, 'YYYY-MM-DD')""", 
-                    con=conn, params=[s_date, e_date])
-
-                status.update(label="📉 Fetching Baseline Data...", expanded=False)
-                try:
-                    df_base = pd.read_sql("""
-                        SELECT DIST_CODE, AVG_MONTHLY_QTY_MT, TOTAL_LY_QTY_EA, SEGMENT, TARGET_GROWTH_PCT
-                        FROM NDNE_BASELINE""", con=conn)
-                except:
-                    df_base = pd.DataFrame()
-
-                status.update(label="📋 Fetching Master Data...", expanded=False)
-                try:
-                    df_master = pd.read_sql("""
-                        SELECT DIST_CODE, DIST_NAME, DISTRICT, LSA_NAME
-                        FROM NDNE_MASTER""", con=conn)
-                except:
-                    df_master = pd.DataFrame()
-
-                status.update(label="📅 Fetching Last Year Data...", expanded=False)
-                try:
-                    df_ly = pd.read_sql("""
-                        SELECT DIST_CODE, MONTH_NUM, QTY_MT as LY_QTY_MT, 
-                               QTY_EA as LY_QTY_EA, SEGMENT, MAT_CODE
-                        FROM NDNE_LY_ACTUALS""", con=conn)
-                except:
-                    df_ly = pd.DataFrame()
-
-                status.update(label="⚖️ Fetching Domestic Data...", expanded=False)
-                try:
-                    df_dom = pd.read_sql("""
-                        SELECT DIST_CODE, SUM(QTY_MT) as DOM_QTY_MT
-                        FROM DOMESTIC_ACTUALS
+            try:
+                with pool.acquire() as conn:
+                    st.write("DEBUG: Connection acquired!")
+                    status.update(label="📊 Fetching Daily Actuals...", expanded=False)
+                    df_act = pd.read_sql("""
+                        SELECT DIST_CODE,
+                               TO_CHAR(BILL_DATE,'YYYY-MM') AS MONTH,
+                               BILL_DATE, QTY_EA, QTY_MT, SEGMENT, LSA_NAME, DISTRICT, MAT_CODE
+                        FROM NDNE_ACTUALS
                         WHERE BILL_DATE >= TO_DATE(:1, 'YYYY-MM-DD')
-                          AND BILL_DATE <= TO_DATE(:2, 'YYYY-MM-DD')
-                        GROUP BY DIST_CODE""", 
-                    con=conn, params=[s_date, e_date])
-                except:
-                    df_dom = pd.DataFrame()
-                
-                status.update(label="✅ Data Load Complete!", state="complete", expanded=False)
+                          AND BILL_DATE <= TO_DATE(:2, 'YYYY-MM-DD')""", 
+                        con=conn, params=[s_date, e_date])
+
+                    status.update(label="📉 Fetching Baseline Data...", expanded=False)
+                    try:
+                        df_base = pd.read_sql("""
+                            SELECT DIST_CODE, AVG_MONTHLY_QTY_MT, TOTAL_LY_QTY_EA, SEGMENT, TARGET_GROWTH_PCT
+                            FROM NDNE_BASELINE""", con=conn)
+                    except:
+                        df_base = pd.DataFrame()
+
+                    status.update(label="📋 Fetching Master Data...", expanded=False)
+                    try:
+                        df_master = pd.read_sql("""
+                            SELECT DIST_CODE, DIST_NAME, DISTRICT, LSA_NAME
+                            FROM NDNE_MASTER""", con=conn)
+                    except:
+                        df_master = pd.DataFrame()
+
+                    status.update(label="📅 Fetching Last Year Data...", expanded=False)
+                    try:
+                        df_ly = pd.read_sql("""
+                            SELECT DIST_CODE, MONTH_NUM, QTY_MT as LY_QTY_MT, 
+                                   QTY_EA as LY_QTY_EA, SEGMENT, MAT_CODE
+                            FROM NDNE_LY_ACTUALS""", con=conn)
+                    except:
+                        df_ly = pd.DataFrame()
+
+                    status.update(label="⚖️ Fetching Domestic Data...", expanded=False)
+                    try:
+                        df_dom = pd.read_sql("""
+                            SELECT DIST_CODE, SUM(QTY_MT) as DOM_QTY_MT
+                            FROM DOMESTIC_ACTUALS
+                            WHERE BILL_DATE >= TO_DATE(:1, 'YYYY-MM-DD')
+                              AND BILL_DATE <= TO_DATE(:2, 'YYYY-MM-DD')
+                            GROUP BY DIST_CODE""", 
+                        con=conn, params=[s_date, e_date])
+                    except:
+                        df_dom = pd.DataFrame()
+            except Exception as conn_err:
+                st.write(f"DEBUG: pool.acquire() or query FAILED: {conn_err}")
+                status.update(label=f"❌ Connection/Query Failed: {conn_err}", state="error")
+                return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+            status.update(label="✅ Data Load Complete!", state="complete", expanded=False)
 
         if not df_ly.empty and not df_master.empty:
             df_ly = pd.merge(df_ly, df_master[['DIST_CODE', 'LSA_NAME', 'DISTRICT']].drop_duplicates(), on='DIST_CODE', how='left')
