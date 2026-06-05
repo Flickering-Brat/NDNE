@@ -371,20 +371,25 @@ with st.sidebar:
 st.title("🛢️ IndianOil NDNE Advanced Analytics")
 st.markdown(f"Enterprise Sales Tracking System — FY {selected_fy}")
 
-conn_pool = get_db_pool()
-
-if not conn_pool:
-    st.warning("⚠️ Database connection not established. Check sidebar for details.")
-    st.stop()
-else:
-    st.sidebar.success("📡 Database Connected")
+# Move pool creation inside load_data or handle it more safely
+def get_active_pool():
+    pool = get_db_pool()
+    if not pool:
+        st.warning("⚠️ Database connection not established. Check sidebar for details.")
+        st.stop()
+    return pool
 
 # ── Data Load ─────────────────────────────────────────────────────────────────
 @st.cache_data(ttl=600)
 def load_data(s_date, e_date):
     try:
         with st.status("📡 Connecting to Oracle Database...", expanded=False) as status:
-            with conn_pool.acquire() as conn:
+            pool = get_db_pool()
+            if not pool:
+                status.update(label="❌ Connection Failed", state="error")
+                return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+            
+            with pool.acquire() as conn:
                 status.update(label="📊 Fetching Daily Actuals...", expanded=False)
                 df_act = pd.read_sql("""
                     SELECT DIST_CODE,
