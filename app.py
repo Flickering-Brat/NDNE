@@ -12,9 +12,11 @@ from st_aggrid import AgGrid, GridOptionsBuilder
 
 st.set_page_config(page_title="IndianOil NDNE Sales Management", layout="wide", page_icon="🛢️")
 
+st.write("DEBUG: App started...")
 st.info("🚀 System initialized at: " + time.strftime("%H:%M:%S"))
 
 # ── Brand Theming ─────────────────────────────────────────────────────────────
+st.write("DEBUG: Applying themes...")
 st.markdown("""
 <style>
   .stApp { background-color: #0b1426; color: white; }
@@ -380,16 +382,22 @@ def get_active_pool():
     return pool
 
 # ── Data Load ─────────────────────────────────────────────────────────────────
-@st.cache_data(ttl=600)
+# Temporarily disable cache for debugging
+# @st.cache_data(ttl=600)
 def load_data(s_date, e_date):
+    st.write(f"DEBUG: Entering load_data with {s_date} to {e_date}")
     try:
-        with st.status("📡 Connecting to Oracle Database...", expanded=False) as status:
+        with st.status("📡 Connecting to Oracle Database...", expanded=True) as status:
+            st.write("DEBUG: About to call get_db_pool()...")
             pool = get_db_pool()
             if not pool:
+                st.write("DEBUG: get_db_pool() returned None")
                 status.update(label="❌ Connection Failed", state="error")
                 return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
             
+            st.write("DEBUG: About to acquire connection from pool...")
             with pool.acquire() as conn:
+                st.write("DEBUG: Connection acquired!")
                 status.update(label="📊 Fetching Daily Actuals...", expanded=False)
                 df_act = pd.read_sql("""
                     SELECT DIST_CODE,
