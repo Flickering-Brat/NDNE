@@ -807,6 +807,13 @@ with tab_cur_month:
         cur_perf['Growth % vs LY'] = cur_perf.apply(lambda r: safe_pct(r['CY_MT'] - r['LY_MT'], r['LY_MT']), axis=1)
         cur_perf['Gap vs Prorata Target (MT)'] = (cur_perf['CY_MT'] - cur_perf['Pro-rata Target (MT)']).round(2)
         
+        # Total Upliftment Column
+        m_num_int = int(proration_date.strftime('%m'))
+        ly_year_val = str(start_year - 1) if m_num_int >= 4 else str(start_year)
+        month_full_name = proration_date.strftime('%B')
+        uplift_col_name = f"{month_full_name}'{ly_year_val[-2:]} Total Upliftment"
+        cur_perf[uplift_col_name] = (cur_perf['CY_MT'] - cur_perf['LY_MT']).round(2)
+        
         cur_perf = cur_perf.rename(columns={
             'DIST_NAME': 'Distributor',
             'LSA_NAME': 'LSA',
