@@ -464,6 +464,14 @@ def load_data(s_date, e_date):
 
 df_act, df_base, df_master, df_ly, df_dom = load_data(start_date, end_date)
 
+# DEBUG: Check LY data distribution
+with st.expander("DEBUG: LY Data Check"):
+    if not df_ly.empty:
+        st.write("LY Data Sample:", df_ly.head())
+        st.write("LY Sales by Month Num:", df_ly.groupby('MONTH_NUM')['LY_QTY_MT'].sum())
+    else:
+        st.warning("df_ly is empty!")
+
 
 if df_master.empty:
     st.warning("🚨 No Master Data found! Upload master.xlsx via sidebar.")
@@ -767,6 +775,10 @@ with tab_cur_month:
         cur_month_num = proration_date.strftime('%m')
         month_label = MONTH_LABELS.get(cur_month_str, cur_month_str)
         
+        # Determine LY month label (e.g. Jun'25 for Jun'26)
+        ly_month_str = f"{int(cur_month_str[:4])-1}-{cur_month_str[5:]}"
+        ly_month_label = MONTH_LABELS.get(ly_month_str, ly_month_str)
+        
         # Calculate days for pro-rata
         import calendar
         last_day_in_month = calendar.monthrange(proration_date.year, proration_date.month)[1]
@@ -818,19 +830,19 @@ with tab_cur_month:
             'DIST_NAME': 'Distributor',
             'LSA_NAME': 'LSA',
             'CY_MT': f"CY {month_label} (MT)",
-            'LY_MT': f"LY {month_label} (Same Period)",
+            'LY_MT': f"LY {ly_month_label} (Same Period)",
             'FULL_TARGET_MT': f"Full {month_label} Target (MT)"
         }).sort_values(f"CY {month_label} (MT)", ascending=False)
         
         # Totals
         t_cy = cur_perf[f"CY {month_label} (MT)"].sum()
-        t_ly = cur_perf[f"LY {month_label} (Same Period)"].sum()
+        t_ly = cur_perf[f"LY {ly_month_label} (Same Period)"].sum()
         t_prorata = cur_perf['Pro-rata Target (MT)'].sum()
         t_full_target = cur_perf[f"Full {month_label} Target (MT)"].sum()
         
         col1, col2, col3, col4 = st.columns(4)
         col1.metric(f"Total CY {month_label}", f"{t_cy:,.2f} MT")
-        col2.metric(f"LY {month_label} (Same Period)", f"{t_ly:,.2f} MT")
+        col2.metric(f"LY {ly_month_label} (Same Period)", f"{t_ly:,.2f} MT")
         col3.metric("Full Month Target", f"{t_full_target:,.2f} MT")
         col4.metric("Prorata Ach %", f"{safe_pct(t_cy, t_prorata):.2f}%", delta=f"{t_cy - t_prorata:+,.2f} MT vs Prorata")
 
@@ -900,6 +912,10 @@ with tab_ftl:
             cur_month_num = max_date.strftime('%m')
             month_label = MONTH_LABELS.get(cur_month_str, cur_month_str)
             
+            # Determine LY month label (e.g. Jun'25 for Jun'26)
+            ly_month_str = f"{int(cur_month_str[:4])-1}-{cur_month_str[5:]}"
+            ly_month_label = MONTH_LABELS.get(ly_month_str, ly_month_str)
+            
             # CY Current Month
             cy_ftl_cur = ftl_cy[ftl_cy['MONTH'] == cur_month_str].groupby('DIST_CODE')['QTY_EA'].sum().reset_index()
             cy_ftl_cur.columns = ['DIST_CODE', 'CY_EA_CUR']
@@ -940,7 +956,7 @@ with tab_ftl:
             
             fk1, fk2, fk3, fk4 = st.columns(4)
             fk1.metric(f"CY {month_label} (EA)", f"{t_cy_ea:,.0f}")
-            fk2.metric(f"LY {month_label} (EA)", f"{t_ly_ea:,.0f}")
+            fk2.metric(f"LY {ly_month_label} (EA)", f"{t_ly_ea:,.0f}")
             fk3.metric("Monthly Growth", f"{t_cy_ea - t_ly_ea:+,.0f}", delta=f"{safe_pct(t_cy_ea - t_ly_ea, t_ly_ea):.2f}%")
             fk4.metric("YTD Upliftment", f"{t_ytd_uplift:+,.0f} EA")
             
@@ -960,7 +976,7 @@ with tab_ftl:
             lsa_ftl = lsa_ftl.rename(columns={
                 'LSA_NAME': 'LSA',
                 'CY_EA_CUR': f'CY {month_label}',
-                'LY_EA_CUR': f'LY {month_label}',
+                'LY_EA_CUR': f'LY {ly_month_label}',
                 'PRORATA_TARGET_EA': 'Prorata Target (EA)'
             }).sort_values(f'CY {month_label}', ascending=False)
             
@@ -975,7 +991,7 @@ with tab_ftl:
                 'DIST_NAME': 'Distributor',
                 'LSA_NAME': 'LSA',
                 'CY_EA_CUR': f'CY {month_label}',
-                'LY_EA_CUR': f'LY {month_label}',
+                'LY_EA_CUR': f'LY {ly_month_label}',
                 'CY_EA_YTD': 'CY YTD (EA)',
                 'LY_EA_YTD': 'LY YTD (EA)',
                 'PRORATA_TARGET_EA': 'Prorata Target (EA)'
