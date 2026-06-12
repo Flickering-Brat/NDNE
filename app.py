@@ -464,22 +464,6 @@ def load_data(s_date, e_date):
 
 df_act, df_base, df_master, df_ly, df_dom = load_data(start_date, end_date)
 
-# DEBUG: Check LY data distribution
-with st.expander("DEBUG: LY Data Check"):
-    if not df_ly.empty:
-        st.write("LY Data Sample:", df_ly.head())
-        st.write("LY Sales by Month Num:", df_ly.groupby('MONTH_NUM')['LY_QTY_MT'].sum())
-        st.write("Elapsed Month Nums:", elapsed_month_nums)
-        st.write("Data Type of MONTH_NUM in df_ly:", df_ly['MONTH_NUM'].dtype)
-        if len(elapsed_month_nums) > 0:
-            st.write("Type of first elapsed month:", type(elapsed_month_nums[0]))
-        
-        # Check if '04' is actually in df_ly
-        apr_data = df_ly[df_ly['MONTH_NUM'].isin(['04', 4, '4'])]
-        st.write(f"Total sales for month 04/4 in df_ly: {apr_data['LY_QTY_MT'].sum():.2f}")
-    else:
-        st.warning("df_ly is empty!")
-
 
 if df_master.empty:
     st.warning("🚨 No Master Data found! Upload master.xlsx via sidebar.")
@@ -512,6 +496,28 @@ fy_months_list = [m for m in FY_MONTH_ORDER if start_date <= m <= end_date]
 current_month_limit = proration_date.strftime('%Y-%m')
 elapsed_month_strs = [m for m in fy_months_list if m <= current_month_limit]
 elapsed_month_nums = sorted(list(set([m.split('-')[1] for m in elapsed_month_strs] + df_act['MONTH'].unique().tolist())))
+
+# DEBUG: Check LY data distribution and Master alignment
+with st.expander("DEBUG: LY Data Check"):
+    if not df_ly.empty:
+        st.write("LY Sales by Month Num (Raw):", df_ly.groupby('MONTH_NUM')['LY_QTY_MT'].sum())
+        st.write("Elapsed Month Nums:", elapsed_month_nums)
+        
+        # Check for distributors in LY but not in Master
+        ly_distributors = set(df_ly['DIST_CODE'].unique())
+        master_distributors = set(df_master['DIST_CODE'].unique())
+        missing_in_master = ly_distributors - master_distributors
+        if missing_in_master:
+            st.warning(f"⚠️ {len(missing_in_master)} distributors in LY data are MISSING from Master list!")
+            missing_sales = df_ly[df_ly['DIST_CODE'].isin(missing_in_master)]['LY_QTY_MT'].sum()
+            st.write(f"Total Sales LOST due to missing master records: {missing_sales:.2f} MT")
+            st.write("First 5 missing codes:", list(missing_in_master)[:5])
+        
+        # Check April specifically
+        apr_data = df_ly[df_ly['MONTH_NUM'].isin(['04', 4, '4'])]
+        st.write(f"Total RAW sales for April (04) in df_ly: {apr_data['LY_QTY_MT'].sum():.2f}")
+    else:
+        st.warning("df_ly is empty!")
 
 cur_month_num = proration_date.strftime('%m')
 days_in_cur_month = calendar.monthrange(proration_date.year, proration_date.month)[1]
