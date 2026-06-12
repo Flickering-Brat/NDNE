@@ -964,6 +964,7 @@ with tab_ftl:
                 'PRORATA_TARGET_EA': 'Prorata Target (EA)'
             }).sort_values(f'CY {month_label}', ascending=False)
             
+            download_button(lsa_ftl.round(0), f"lsa_ftl_performance_{month_label}.csv")
             aggrid_render(lsa_ftl.round(0), height=300)
             
             st.divider()
