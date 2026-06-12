@@ -492,10 +492,15 @@ else:
 months_passed = get_fractional_months(proration_date)
 
 # Extract elapsed month numbers (e.g., '04', '05') for LY comparison
-fy_months_list = [m for m in FY_MONTH_ORDER if start_date <= m <= end_date]
+fy_months_list = [m for m in FY_MONTH_ORDER if start_date[:7] <= m <= end_date[:7]]
 current_month_limit = proration_date.strftime('%Y-%m')
 elapsed_month_strs = [m for m in fy_months_list if m <= current_month_limit]
-elapsed_month_nums = sorted(list(set([m.split('-')[1] for m in elapsed_month_strs] + df_act['MONTH'].unique().tolist())))
+
+# Extract only the month numbers (04, 05, etc)
+elapsed_month_nums = sorted(list(set(
+    [m.split('-')[1] for m in elapsed_month_strs] + 
+    [str(m).split('-')[1] for m in df_act['MONTH'].unique() if '-' in str(m)]
+)))
 
 # DEBUG: Check LY data distribution and Master alignment
 with st.expander("DEBUG: LY Data Check"):
