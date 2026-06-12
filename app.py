@@ -469,6 +469,14 @@ with st.expander("DEBUG: LY Data Check"):
     if not df_ly.empty:
         st.write("LY Data Sample:", df_ly.head())
         st.write("LY Sales by Month Num:", df_ly.groupby('MONTH_NUM')['LY_QTY_MT'].sum())
+        st.write("Elapsed Month Nums:", elapsed_month_nums)
+        st.write("Data Type of MONTH_NUM in df_ly:", df_ly['MONTH_NUM'].dtype)
+        if len(elapsed_month_nums) > 0:
+            st.write("Type of first elapsed month:", type(elapsed_month_nums[0]))
+        
+        # Check if '04' is actually in df_ly
+        apr_data = df_ly[df_ly['MONTH_NUM'].isin(['04', 4, '4'])]
+        st.write(f"Total sales for month 04/4 in df_ly: {apr_data['LY_QTY_MT'].sum():.2f}")
     else:
         st.warning("df_ly is empty!")
 
